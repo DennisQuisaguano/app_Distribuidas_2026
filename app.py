@@ -3,6 +3,7 @@ import os
 import certifi
 import pytds
 import requests
+import traceback
 from threading import Lock
 
 #Conexion con la base de datos
@@ -302,7 +303,10 @@ def send_catalog_email():
         texto_productos = "Hola,\n\nA continuación te compartimos el listado de productos disponibles:\n\n"
         
         for row in cursor.fetchall():
-            texto_productos += f"- {row.names} | Precio: ${row.price} | Stock: {row.stock} unidades\n"
+            nombre = getattr(row, 'names', 'Sin nombre')
+            precio = getattr(row, 'price', '0.00')
+            stock = getattr(row, 'stock', '0')
+            texto_productos += f"- {nombre} | Precio: ${precio} | Stock: {stock} unidades\n"
 
         texto_productos += "\nEste es un mensaje automatizado desde tu API Distribuida."
 
@@ -313,7 +317,7 @@ def send_catalog_email():
         correo_remitente = os.environ.get("BREVO_SENDER_EMAIL")
 
         if not brevo_api_key or not correo_remitente:
-            return jsonify({"message": "Faltan configurar las credenciales de Brevo en el servidor"}), 500
+            return jsonify({"message": "Faltan configurar las variables de entorno de Brevo en Render"}), 500
 
         datos_brevo = {
             "sender": {"name": "Dennis Quisaguano", "email": correo_remitente},
@@ -338,11 +342,13 @@ def send_catalog_email():
             return jsonify({"message": "Correo enviado exitosamente"}), 200
         else:
             return jsonify({
-                "message": "Error al enviar correo en Brevo", 
+                "message": "Brevo rechazó la petición", 
                 "error": respuesta_brevo.text
             }), 500
 
     except Exception as e:
+        error_detallado = traceback.format_exc()
+        print("ERROR EN SEND-CATALOG-EMAIL:", error_detallado)
         return jsonify({"message": "Error interno en el servidor", "error": str(e)}), 500
 
 if __name__ == '__main__':
