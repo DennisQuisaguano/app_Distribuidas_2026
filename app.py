@@ -296,37 +296,86 @@ def send_catalog_email():
         
         correo_destino = data.get('email')
 
+        # 1. Consultar los productos desde la base de datos
         conn = getConnection()
         cursor = conn.cursor()
         cursor.execute("SELECT id, names, price, stock FROM products_vw")
         
+        filas_html = ''
         texto_productos = "Hola,\n\nA continuación te compartimos el listado de productos disponibles:\n\n"
         
-        for row in cursor.fetchall():
+        for index, row in enumerate(cursor.fetchall()):
             nombre = getattr(row, 'names', 'Sin nombre')
             precio = getattr(row, 'price', '0.00')
             stock = getattr(row, 'stock', '0')
-            texto_productos += f"- {nombre} | Precio: ${precio} | Stock: {stock} unidades\n"
 
-        texto_productos += "\nEste es un mensaje automatizado desde tu API Distribuida."
+            texto_productos += f"- {nombre} | Precio: ${precio} | Stock: {stock} unidades\n"
+            bg_color = '#ffffff' if index % 2 == 0 else '#f9fbfc'
+
+            filas_html += f'''
+            <tr style="background-color: {bg_color};">
+                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #333333; font-weight: 500;">{nombre}</td>
+                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #0284c7; font-weight: bold; text-align: right;">${precio}</td>
+                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #475569; text-align: right;">{stock} unidades</td>
+            </tr>'''
 
         cursor.close()
         conn.close()
 
+        # 2. Diseño HTML profesional para el correo
+        contenido_html = f'''
+        <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 30px 0; margin: 0;">
+            <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                <tr>
+                    <td style="background-color: #0284c7; padding: 25px; text-align: center; color: #ffffff;">
+                        <h2 style="margin: 0; font-size: 22px; font-weight: bold;">📦 Catálogo de Productos</h2>
+                        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Listado oficial actualizado</p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 30px;">
+                        <p style="margin-top: 0; color: #333333; font-size: 15px;">Hola,</p>
+                        <p style="color: #4b5563; font-size: 15px; line-height: 1.5;">A continuación te compartimos el detalle de los productos disponibles que solicitaste:</p>
+                        
+                        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin-top: 20px; border: 1px solid #e1e8ed; border-radius: 8px; overflow: hidden;">
+                            <thead>
+                                <tr style="background-color: #f8fafc; color: #1e293b; text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed;">Producto</th>
+                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed; text-align: right;">Precio</th>
+                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed; text-align: right;">Stock</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filas_html}
+                            </tbody>
+                        </table>
+
+                        <p style="margin-top: 25px; color: #64748b; font-size: 13px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+                            Este es un mensaje automatizado enviado desde tu API Distribuida.
+                        </p>
+                    </td>
+                </tr>
+            </table>
+        </div>'''
+
+        # 3. Credenciales de Brevo
         brevo_api_key = os.environ.get("BREVO_API_KEY")
         correo_remitente = os.environ.get("BREVO_SENDER_EMAIL")
 
         if not brevo_api_key or not correo_remitente:
             return jsonify({"message": "Faltan configurar las variables de entorno de Brevo en Render"}), 500
 
+        # Enviamos 'htmlContent' para que llegue con diseño visual
         datos_brevo = {
             "sender": {"name": "Dennis Quisaguano", "email": correo_remitente},
             "replyTo": {"name": "Dennis Quisaguano", "email": correo_remitente},
             "to": [{"email": correo_destino}],
             "subject": "Tu catálogo de productos solicitado",
+            "htmlContent": contenido_html,
             "textContent": texto_productos
         }
 
+        # 4. Petición POST a la API de Brevo
         respuesta_brevo = requests.post(
             'https://api.brevo.com/v3/smtp/email',
             headers={
