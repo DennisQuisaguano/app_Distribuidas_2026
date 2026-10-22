@@ -287,95 +287,50 @@ def update_version():
         }), 500
 
 
-@app.route('/api/send-catalog-email', methods=['POST'])
-def send_catalog_email():
+@app.route('/api/procesar', methods=['POST'])
+def procesar_catalogo():
     try:
-        data = request.get_json()
-        if not data or not data.get('email'):
-            return jsonify({"message": "Falta el correo de destino"}), 400
         
-        correo_destino = data.get('email')
+        api_key_recibida = request.headers.get('X-API-Key')
+        api_key_esperada = os.environ.get("PROCESS_API_KEY")
 
-        # 1. Consultar los productos desde la base de datos
+        if not api_key_recibida or api_key_recibida != api_key_esperada:
+            return jsonify({"message": "API Key no válida"}), 401
+
+        data = request.get_json(silent=True) or {}
+        correo_destino = data.get('email') or os.environ.get("EMAIL_DESTINO")
+
+        if not correo_destino:
+            return jsonify({"message": "Falta el correo de destino"}), 400
+
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, names, price, stock FROM products_vw")
+        cursor.execute("SELECT names, price FROM products_vw")
         
-        filas_html = ''
-        texto_productos = "Hola,\n\nA continuación te compartimos el listado de productos disponibles:\n\n"
+        filas = cursor.fetchall()
+        total_productos = len(filas)
         
-        for index, row in enumerate(cursor.fetchall()):
-            nombre = getattr(row, 'names', 'Sin nombre')
-            precio = getattr(row, 'price', '0.00')
-            stock = getattr(row, 'stock', '0')
-
-            texto_productos += f"- {nombre} | Precio: ${precio} | Stock: {stock} unidades\n"
-            bg_color = '#ffffff' if index % 2 == 0 else '#f9fbfc'
-
-            filas_html += f'''
-            <tr style="background-color: {bg_color};">
-                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #333333; font-weight: 500;">{nombre}</td>
-                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #0284c7; font-weight: bold; text-align: right;">${precio}</td>
-                <td style="padding: 12px 15px; border-bottom: 1px solid #e1e8ed; color: #475569; text-align: right;">{stock} unidades</td>
-            </tr>'''
+        texto_productos = f"Reporte simple de productos (Total: {total_productos}):\n\n"
+        for row in filas:
+            texto_productos += f"- {row.names} | Precio: ${row.price}\n"
 
         cursor.close()
         conn.close()
 
-        # 2. Diseño HTML profesional para el correo
-        contenido_html = f'''
-        <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 30px 0; margin: 0;">
-            <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                <tr>
-                    <td style="background-color: #0284c7; padding: 25px; text-align: center; color: #ffffff;">
-                        <h2 style="margin: 0; font-size: 22px; font-weight: bold;">📦 Catálogo de Productos</h2>
-                        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Listado oficial actualizado</p>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 30px;">
-                        <p style="margin-top: 0; color: #333333; font-size: 15px;">Hola,</p>
-                        <p style="color: #4b5563; font-size: 15px; line-height: 1.5;">A continuación te compartimos el detalle de los productos disponibles que solicitaste:</p>
-                        
-                        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin-top: 20px; border: 1px solid #e1e8ed; border-radius: 8px; overflow: hidden;">
-                            <thead>
-                                <tr style="background-color: #f8fafc; color: #1e293b; text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
-                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed;">Producto</th>
-                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed; text-align: right;">Precio</th>
-                                    <th style="padding: 12px 15px; border-bottom: 2px solid #e1e8ed; text-align: right;">Stock</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filas_html}
-                            </tbody>
-                        </table>
-
-                        <p style="margin-top: 25px; color: #64748b; font-size: 13px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px;">
-                            Este es un mensaje automatizado enviado desde tu API Distribuida.
-                        </p>
-                    </td>
-                </tr>
-            </table>
-        </div>'''
-
-        # 3. Credenciales de Brevo
         brevo_api_key = os.environ.get("BREVO_API_KEY")
-        correo_remitente = os.environ.get("BREVO_SENDER_EMAIL")
+        correo_remitente = os.environ.get("EMAIL_REMITENTE")
 
         if not brevo_api_key or not correo_remitente:
-            return jsonify({"message": "Faltan configurar las variables de entorno de Brevo en Render"}), 500
+            return jsonify({"message": "Faltan configurar las credenciales de Brevo en el servidor"}), 500
 
-        # Enviamos 'htmlContent' para que llegue con diseño visual
         datos_brevo = {
-            "sender": {"name": "Dennis Quisaguano", "email": correo_remitente},
-            "replyTo": {"name": "Dennis Quisaguano", "email": correo_remitente},
+            "sender": {"name": "Administrador UTA", "email": correo_remitente},
+            "replyTo": {"name": "Administrador UTA", "email": correo_remitente},
             "to": [{"email": correo_destino}],
-            "subject": "Tu catálogo de productos solicitado",
-            "htmlContent": contenido_html,
+            "subject": "Reporte Simple de Productos",
             "textContent": texto_productos
         }
 
-        # 4. Petición POST a la API de Brevo
         respuesta_brevo = requests.post(
             'https://api.brevo.com/v3/smtp/email',
             headers={
@@ -388,16 +343,89 @@ def send_catalog_email():
         )
 
         if respuesta_brevo.status_code in [200, 201]:
-            return jsonify({"message": "Correo enviado exitosamente"}), 200
+            return jsonify({
+                "procesamiento": "finalizado",
+                "total_productos": total_productos,
+                "notificacion": "enviado"
+            }), 200
         else:
             return jsonify({
-                "message": "Brevo rechazó la petición", 
+                "message": "Error al enviar correo en Brevo", 
                 "error": respuesta_brevo.text
             }), 500
 
     except Exception as e:
         error_detallado = traceback.format_exc()
-        print("ERROR EN SEND-CATALOG-EMAIL:", error_detallado)
+        print("ERROR EN /api/procesar:", error_detallado)
+        return jsonify({"message": "Error interno en el servidor", "error": str(e)}), 500
+    try:
+
+        api_key_recibida = request.headers.get('X-API-Key')
+        api_key_esperada = os.environ.get("PROCESS_API_KEY")
+
+        if not api_key_recibida or api_key_recibida != api_key_esperada:
+            return jsonify({"message": "API Key no válida"}), 401
+
+        data = request.get_json(silent=True) or {}
+        correo_destino = data.get('email') or os.environ.get("EMAIL_DESTINO")
+
+        if not correo_destino:
+            return jsonify({"message": "Falta el correo de destino"}), 400
+
+        conn = getConnection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, names, price, stock FROM products_vw")
+        
+        filas = cursor.fetchall()
+        total_productos = len(filas)
+        
+        texto_productos = "Hola, administrador:\n\nA continuación el reporte de productos:\n\n"
+        for row in filas:
+            texto_productos += f"- {row.names} | Precio: ${row.price} | Stock: {row.stock} unidades\n"
+
+        cursor.close()
+        conn.close()
+
+        brevo_api_key = os.environ.get("BREVO_API_KEY")
+        correo_remitente = os.environ.get("EMAIL_REMITENTE")
+
+        if not brevo_api_key or not correo_remitente:
+            return jsonify({"message": "Faltan configurar las credenciales de Brevo en el servidor"}), 500
+
+        datos_brevo = {
+            "sender": {"name": "Administrador UTA", "email": correo_remitente},
+            "replyTo": {"name": "Administrador UTA", "email": correo_remitente},
+            "to": [{"email": correo_destino}],
+            "subject": "Notificación de Catálogo - Procesado",
+            "textContent": texto_productos
+        }
+
+        respuesta_brevo = requests.post(
+            'https://api.brevo.com/v3/smtp/email',
+            headers={
+                'accept': 'application/json',
+                'api-key': brevo_api_key.strip(),
+                'content-type': 'application/json'
+            },
+            json=datos_brevo,
+            timeout=20
+        )
+
+        if respuesta_brevo.status_code in [200, 201]:
+            return jsonify({
+                "procesamiento": "finalizado",
+                "total_productos": total_productos,
+                "notificacion": "enviado"
+            }), 200
+        else:
+            return jsonify({
+                "message": "Error al enviar correo en Brevo", 
+                "error": respuesta_brevo.text
+            }), 500
+
+    except Exception as e:
+        error_detallado = traceback.format_exc()
+        print("ERROR EN /api/procesar:", error_detallado)
         return jsonify({"message": "Error interno en el servidor", "error": str(e)}), 500
 
 if __name__ == '__main__':
